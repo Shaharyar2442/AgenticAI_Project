@@ -1,0 +1,45 @@
+# Python
+__pycache__/
+*.pyc
+*.pyo
+*.egg-info/
+dist/
+build/
+.eggs/
+*.egg
+venv/
+.venv/
+
+# Environment
+.env
+
+# Data outputs (keep samples only)
+data/outputs/audio/*
+data/outputs/images/*
+data/outputs/video/*
+data/temp/*
+data/state_versions/*
+!data/outputs/samples/
+!**/.gitkeep
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Node
+node_modules/
+frontend/dist/
+
+# Database
+*.db
+*.sqlite
+
+# Misc
+*.log
+implementation_plan*.md
