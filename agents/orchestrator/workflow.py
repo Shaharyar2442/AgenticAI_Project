@@ -33,7 +33,6 @@ async def run_pipeline(
         story = await generate_story(user_prompt)
         state.story = story
         state.status = "phase1_done"
-        state_mgr.snapshot(1, state.model_dump(), [])
         await report(f"Story '{story.title}' generated: {len(story.scenes)} scenes, {len(story.characters)} characters", "phase1")
     except Exception as e:
         state.status = "phase1_failed"
@@ -46,7 +45,6 @@ async def run_pipeline(
         manifest = await generate_audio(story, session_id)
         state.timing_manifest = manifest
         state.status = "phase2_done"
-        state_mgr.snapshot(2, state.model_dump(), [])
         await report(f"Audio generated: {manifest.total_duration_ms}ms total", "phase2")
     except Exception as e:
         state.status = "phase2_failed"
@@ -58,10 +56,11 @@ async def run_pipeline(
     try:
         final_path = await generate_video(state, session_id)
         state.status = "complete"
+        # Only snapshot once the full initial pipeline is complete (v1)
         all_assets = (list(state.scene_images.values()) +
                      list(state.character_portraits.values()) +
                      [final_path])
-        state_mgr.snapshot(3, state.model_dump(), all_assets)
+        state_mgr.snapshot(state.version, state.model_dump(), all_assets)
         await report(f"Video complete: {final_path}", "phase3")
     except Exception as e:
         state.status = "phase3_failed"
