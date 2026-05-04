@@ -18,18 +18,20 @@ PORTRAIT_SUFFIX = ", character portrait, centered, upper body, facing forward, n
 
 async def _download_image(url: str, output_path: str) -> bool:
     """Download image with retry + exponential backoff."""
-    for attempt in range(MAX_IMAGE_RETRIES):
+    max_retries = max(MAX_IMAGE_RETRIES, 5)  # Always try at least 5 times
+    for attempt in range(max_retries):
         try:
-            async with httpx.AsyncClient(timeout=60, follow_redirects=True) as client:
+            async with httpx.AsyncClient(timeout=120, follow_redirects=True) as client:
                 resp = await client.get(url)
                 if resp.status_code == 200 and len(resp.content) > 1000:
                     with open(output_path, "wb") as f:
                         f.write(resp.content)
                     return True
                 logger.warning(f"Attempt {attempt+1}: status={resp.status_code}, size={len(resp.content)}")
-        except (httpx.TimeoutException, httpx.ConnectError) as e:
-            logger.warning(f"Attempt {attempt+1} failed: {e}")
-        await asyncio.sleep(2 ** attempt)
+        except Exception as e:
+            logger.warning(f"Attempt {attempt+1} failed: {e!r}")
+        wait = min(2 ** attempt, 30)  # Cap backoff at 30s
+        await asyncio.sleep(wait)
     return False
 
 

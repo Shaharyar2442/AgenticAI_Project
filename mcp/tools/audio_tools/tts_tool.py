@@ -1,7 +1,6 @@
 """
 TTS Tool — edge-tts with gTTS fallback.
-edge-tts provides word-level timestamps but can get 403-blocked.
-gTTS is reliable but only provides estimated timestamps.
+Uses a simplified VOICE_MAP for reliable neural voice assignment.
 """
 from mcp.base_tool import BaseTool
 from shared.config import OUTPUTS_DIR
@@ -12,67 +11,48 @@ import logging
 
 logger = logging.getLogger(__name__)
 
-# Voice presets mapped to character voice descriptions
-VOICE_PRESETS = {
-    "male_deep": "en-US-GuyNeural",
-    "male_casual": "en-US-DavisNeural",
-    "male_narrate": "en-US-ChristopherNeural",
-    "female_warm": "en-US-JennyNeural",
-    "female_narrate": "en-US-AriaNeural",
-    "female_casual": "en-US-SaraNeural",
-    "child": "en-US-AnaNeural",
-    "old_male": "en-GB-RyanNeural",
-    "old_female": "en-AU-NatashaNeural",
-}
-
-# Keywords in voice_description -> preset key
-VOICE_KEYWORDS = {
-    "deep": "male_deep", "authoritative": "male_deep", "strong male": "male_deep",
-    "casual male": "male_casual", "young male": "male_casual", "friendly male": "male_casual",
-    "narrator": "male_narrate", "calm male": "male_narrate",
-    "warm female": "female_warm", "gentle female": "female_warm", "kind female": "female_warm",
-    "female narrator": "female_narrate", "calm female": "female_narrate",
-    "young female": "female_casual", "enthusiastic": "female_casual", "cheerful": "female_casual",
-    "child": "child", "young": "child", "kid": "child",
-    "old male": "old_male", "elderly male": "old_male", "wise": "old_male",
-    "old female": "old_female", "elderly female": "old_female",
-}
-
-# gTTS language/tld combos for variety (not as good as edge-tts voices, but works)
-GTTS_STYLES = {
-    "default": {"lang": "en", "tld": "com"},
-    "british": {"lang": "en", "tld": "co.uk"},
-    "australian": {"lang": "en", "tld": "com.au"},
-    "indian": {"lang": "en", "tld": "co.in"},
+# Simplified, reliable voice map — all stable Microsoft Neural voices
+VOICE_MAP = {
+    "narrator":   "en-US-GuyNeural",      # deep, clear narrator
+    "male":       "en-GB-RyanNeural",      # British male
+    "female":     "en-US-JennyNeural",     # warm female
+    "default":    "en-US-AriaNeural",      # expressive female default
 }
 
 
 def match_voice(voice_description: str) -> str:
     """Match a character's voice_description to an edge-tts voice name."""
-    desc_lower = voice_description.lower()
-    for keyword, preset_key in VOICE_KEYWORDS.items():
-        if keyword in desc_lower:
-            return VOICE_PRESETS[preset_key]
-    if "female" in desc_lower or "woman" in desc_lower:
-        return VOICE_PRESETS["female_narrate"]
-    return VOICE_PRESETS["male_narrate"]
+    desc = voice_description.lower()
+    if "narrator" in desc or "narrat" in desc:
+        return VOICE_MAP["narrator"]
+    if any(w in desc for w in ["male", "man", "boy", "deep", "baritone"]):
+        return VOICE_MAP["male"]
+    if any(w in desc for w in ["female", "woman", "girl", "soft"]):
+        return VOICE_MAP["female"]
+    return VOICE_MAP["default"]
+
+
+def _ms_to_srt(ms: int) -> str:
+    """Convert milliseconds to SRT timestamp."""
+    h = ms // 3600000
+    ms %= 3600000
+    m = ms // 60000
+    ms %= 60000
+    s = ms // 1000
+    ms %= 1000
+    return f"{h:02d}:{m:02d}:{s:02d},{ms:03d}"
 
 
 def _generate_estimated_srt(text: str, duration_ms: int, srt_path: str):
-    """Generate estimated word-level SRT from text and total audio duration.
-    Distributes words evenly across the audio duration.
-    """
+    """Generate estimated word-level SRT from text and total audio duration."""
     words = text.split()
     if not words:
         with open(srt_path, "w", encoding="utf-8") as f:
             f.write("")
         return
 
-    # Estimate: distribute words evenly across duration
     ms_per_word = duration_ms / len(words) if words else 0
     entries = []
-
-    # Group words into subtitle chunks (3-5 words each for readability)
     chunk_size = 4
     for i in range(0, len(words), chunk_size):
         chunk = words[i:i + chunk_size]
@@ -85,17 +65,6 @@ def _generate_estimated_srt(text: str, duration_ms: int, srt_path: str):
             f.write(f"{idx}\n")
             f.write(f"{_ms_to_srt(start)} --> {_ms_to_srt(end)}\n")
             f.write(f"{text_chunk}\n\n")
-
-
-def _ms_to_srt(ms: int) -> str:
-    """Convert milliseconds to SRT timestamp."""
-    h = ms // 3600000
-    ms %= 3600000
-    m = ms // 60000
-    ms %= 60000
-    s = ms // 1000
-    ms %= 1000
-    return f"{h:02d}:{m:02d}:{s:02d},{ms:03d}"
 
 
 class TTSTool(BaseTool):
@@ -121,7 +90,7 @@ class TTSTool(BaseTool):
         except Exception as e:
             logger.warning(f"edge-tts failed: {e}")
 
-        # Strategy 2: gTTS fallback (reliable, estimated timestamps)
+        # Strategy 2: gTTS fallback
         try:
             result = await self._try_gtts(text, audio_path, srt_path)
             if result:
@@ -134,7 +103,7 @@ class TTSTool(BaseTool):
         """Try edge-tts with retry. Returns result dict or None on failure."""
         import edge_tts
 
-        for attempt in range(2):  # Max 2 attempts
+        for attempt in range(2):
             try:
                 communicate = edge_tts.Communicate(text, voice)
                 submaker = edge_tts.SubMaker()
@@ -148,7 +117,6 @@ class TTSTool(BaseTool):
                                 chunk["offset"], chunk["duration"], chunk["text"]
                             )
 
-                # Verify we got actual audio data
                 if os.path.getsize(audio_path) < 100:
                     raise RuntimeError("edge-tts produced empty audio")
 
@@ -171,7 +139,7 @@ class TTSTool(BaseTool):
             except Exception as e:
                 logger.warning(f"edge-tts attempt {attempt+1} failed: {e}")
                 if attempt < 1:
-                    await asyncio.sleep(2)  # Wait before retry
+                    await asyncio.sleep(2)
         return None
 
     async def _try_gtts(self, text: str, audio_path: str, srt_path: str) -> Dict:
@@ -181,7 +149,6 @@ class TTSTool(BaseTool):
 
         logger.info("Falling back to gTTS...")
 
-        # gTTS is synchronous, run in thread pool
         def _do_gtts():
             tts = gTTS(text=text, lang="en", slow=False)
             tts.save(audio_path)
@@ -192,11 +159,8 @@ class TTSTool(BaseTool):
         if not os.path.exists(audio_path) or os.path.getsize(audio_path) < 100:
             raise RuntimeError("gTTS produced empty audio")
 
-        # Measure duration
         audio = PydubSegment.from_mp3(audio_path)
         duration_ms = len(audio)
-
-        # Generate estimated SRT (no word-level timestamps from gTTS)
         _generate_estimated_srt(text, duration_ms, srt_path)
 
         logger.info(f"gTTS OK: {audio_path} ({duration_ms}ms, estimated SRT)")

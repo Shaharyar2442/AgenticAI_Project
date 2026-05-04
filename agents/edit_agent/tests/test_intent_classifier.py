@@ -7,7 +7,7 @@ from agents.edit_agent.intent_classifier import classify_intent
 TEST_CASES = [
     # (user_query, expected_target, expected_intent)
     ("Change the narrator's voice to a whisper",     "audio",       "change_voice_tone"),
-    ("Make scene 2 darker",                          "video_frame", "apply_filter"),
+    ("Make scene 2 darker",                          "video_frame", "change_lighting"),
     ("Add epic background music to scene 3",         "audio",       "add_bgm"),
     ("Remove all subtitles",                         "video",       "remove_subtitles"),
     ("Speed up the last scene",                      "video",       "change_speed"),

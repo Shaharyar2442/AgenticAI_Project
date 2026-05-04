@@ -14,12 +14,15 @@ logger = logging.getLogger(__name__)
 
 FPS = GLOBAL_FPS  # 25 — used in zoompan, overlay, and final concat. NEVER 24.
 
+# IMPORTANT: pan_left/pan_right/pan_up use {duration} placeholder.
+# .format(duration=duration_sec) is called at runtime in _ken_burns.
+# Do NOT pre-process these strings at import time.
 KEN_BURNS_STYLES = {
     "zoom_in_center": "z='min(zoom+0.0015,1.5)':x='iw/2-(iw/zoom/2)':y='ih/2-(ih/zoom/2)'",
-    "zoom_out": "z='if(lte(zoom,1.0),1.5,max(1.001,zoom-0.0015))':x='iw/2-(iw/zoom/2)':y='ih/2-(ih/zoom/2)'",
-    "pan_left": "z='1.1':x='iw*(1-on/(25*{duration}))':y='ih/2-(ih/zoom/2)'",
-    "pan_right": "z='1.1':x='iw*on/(25*{duration})':y='ih/2-(ih/zoom/2)'",
-    "pan_up": "z='1.1':x='iw/2-(iw/zoom/2)':y='ih*(1-on/(25*{duration}))'",
+    "zoom_out":       "z='if(lte(zoom,1.0),1.5,max(1.001,zoom-0.0015))':x='iw/2-(iw/zoom/2)':y='ih/2-(ih/zoom/2)'",
+    "pan_left":       "z='1.1':x='iw*(1-on/(25*{duration}))':y='ih/2-(ih/zoom/2)'",
+    "pan_right":      "z='1.1':x='iw*on/(25*{duration})':y='ih/2-(ih/zoom/2)'",
+    "pan_up":         "z='1.1':x='iw/2-(iw/zoom/2)':y='ih*(1-on/(25*{duration}))'",
 }
 
 
@@ -36,7 +39,7 @@ def _run_ffmpeg(cmd: List[str], description: str = ""):
         result = subprocess.run(cmd, check=True, capture_output=True, text=True)
         return True
     except subprocess.CalledProcessError as e:
-        logger.error(f"FFmpeg failed [{description}]: {e.stderr[:500]}")
+        logger.error(f"FFmpeg failed [{description}]: {e.stderr[:2000]}")
         raise
 
 
@@ -47,11 +50,11 @@ class FFmpegTool(BaseTool):
     async def execute(self, operation: str, **kwargs) -> Dict[str, Any]:
         """Route to specific FFmpeg operation."""
         ops = {
-            "ken_burns": self._ken_burns,
-            "merge_audio": self._merge_audio,
-            "burn_subtitles": self._burn_subtitles,
+            "ken_burns":         self._ken_burns,
+            "merge_audio":       self._merge_audio,
+            "burn_subtitles":    self._burn_subtitles,
             "overlay_portraits": self._overlay_portraits,
-            "speed_change": self._speed_change,
+            "speed_change":      self._speed_change,
         }
         if operation not in ops:
             return {"success": False, "error": f"Unknown operation: {operation}"}
@@ -61,8 +64,14 @@ class FFmpegTool(BaseTool):
                          output_path: str, style: str = "zoom_in_center", **kwargs) -> Dict:
         """Create a Ken Burns animated video clip from a still image."""
         total_frames = int(duration_sec * FPS)
-        zoompan_expr = KEN_BURNS_STYLES.get(style, KEN_BURNS_STYLES["zoom_in_center"])
-        zoompan_expr = zoompan_expr.format(duration=duration_sec)
+
+        # Get raw style string and inject duration at runtime
+        raw_expr = KEN_BURNS_STYLES.get(style, KEN_BURNS_STYLES["zoom_in_center"])
+        try:
+            zoompan_expr = raw_expr.format(duration=duration_sec)
+        except KeyError:
+            logger.warning(f"Ken Burns style '{style}' format failed, falling back to zoom_in_center")
+            zoompan_expr = KEN_BURNS_STYLES["zoom_in_center"]
 
         os.makedirs(os.path.dirname(output_path) or ".", exist_ok=True)
         cmd = [
@@ -87,43 +96,31 @@ class FFmpegTool(BaseTool):
 
     async def _burn_subtitles(self, video_path: str, srt_path: str,
                               output_path: str, **kwargs) -> Dict:
-        """Burn SRT subtitles into video.
-        
-        Windows path escaping for the FFmpeg subtitles filter is notoriously
-        broken (colons, backslashes, spaces all need different escaping by version).
-        The robust fix: copy the SRT next to the video and use a plain filename.
-        """
-        # Copy SRT to same directory as video with a simple name
+        """Burn SRT subtitles into video with Arial font (Windows-safe)."""
         video_dir = os.path.dirname(video_path)
         temp_srt = os.path.join(video_dir, "_subs.srt")
         shutil.copy2(srt_path, temp_srt)
-        
-        # Use relative path from video_dir — no colons, no spaces to escape
-        # Run FFmpeg with cwd=video_dir so relative paths work
+
         video_basename = os.path.basename(video_path)
-        output_basename = os.path.basename(output_path)
-        
         os.makedirs(os.path.dirname(output_path) or ".", exist_ok=True)
-        
+
         cmd = [
             "ffmpeg", "-y", "-i", video_basename,
-            "-vf", "subtitles=_subs.srt:force_style='FontSize=22,PrimaryColour=&HFFFFFF&,Outline=2,Shadow=1'",
+            "-vf", "subtitles=_subs.srt:force_style='FontName=Arial,FontSize=22,PrimaryColour=&HFFFFFF&,Outline=2,Shadow=1'",
             "-c:a", "copy", output_path
         ]
-        
+
         logger.info(f"FFmpeg [burn_subtitles]: running from {video_dir}")
         try:
-            result = subprocess.run(cmd, check=True, capture_output=True, text=True, cwd=video_dir)
+            subprocess.run(cmd, check=True, capture_output=True, text=True, cwd=video_dir)
         except subprocess.CalledProcessError as e:
-            logger.error(f"FFmpeg subtitles failed: {e.stderr[:500]}")
-            # Fallback: skip subtitles, just copy video through
+            logger.error(f"FFmpeg subtitles failed: {e.stderr[:2000]}")
             logger.warning("Subtitle burn failed — copying video without subtitles")
             shutil.copy(video_path, output_path)
         finally:
-            # Cleanup temp SRT
             if os.path.exists(temp_srt):
                 os.remove(temp_srt)
-        
+
         return {"success": True, "output_path": output_path}
 
     async def _overlay_portraits(self, video_path: str,
@@ -135,6 +132,10 @@ class FFmpegTool(BaseTool):
             shutil.copy(video_path, output_path)
             return {"success": True, "output_path": output_path, "note": "no portraits to overlay"}
 
+        # Guard: check input video exists before proceeding
+        if not os.path.exists(video_path):
+            raise FileNotFoundError(f"Input video missing for overlay: {video_path}")
+
         inputs = [video_path] + [p["portrait"] for p in portrait_timeline]
         input_args = []
         for inp in inputs:
@@ -145,17 +146,27 @@ class FFmpegTool(BaseTool):
         for i, entry in enumerate(portrait_timeline):
             inp_idx = i + 1
             out_label = f"v{i}"
+            start = entry["start_sec"]
+            end = entry["end_sec"]
+            # main_h = height of main input (valid FFmpeg overlay variable)
+            # gte*lte avoids Windows single-quote shell parsing issues with between()
             filters.append(
                 f"[{inp_idx}:v]scale=250:250,format=rgba[char{i}];"
-                f"[{prev}][char{i}]overlay=20:H-270:"
-                f"enable='between(t,{entry['start_sec']},{entry['end_sec']})'[{out_label}]"
+                f"[{prev}][char{i}]overlay=20:main_h-270:"
+                f"enable='gte(t,{start})*lte(t,{end})'[{out_label}]"
             )
             prev = out_label
 
+        filter_complex = ";".join(filters)
+        os.makedirs(os.path.dirname(output_path) or ".", exist_ok=True)
+
         cmd = ["ffmpeg", "-y"] + input_args + [
-            "-filter_complex", ";".join(filters),
-            "-map", f"[{prev}]", "-map", "0:a?",
-            "-c:v", "libx264", "-c:a", "copy", output_path
+            "-filter_complex", filter_complex,
+            "-map", f"[{prev}]",
+            "-map", "0:a?",
+            "-c:v", "libx264",
+            "-c:a", "copy",
+            output_path
         ]
         _run_ffmpeg(cmd, "overlay_portraits")
         return {"success": True, "output_path": output_path}
