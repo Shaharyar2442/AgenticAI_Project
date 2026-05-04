@@ -615,6 +615,12 @@ body::before {
   color: var(--text-secondary);
 }
 
+.version-time {
+  font-size: 0.75rem;
+  color: var(--text-muted);
+  margin-left: auto;
+}
+
 .btn-revert {
   padding: 0.45rem 0.9rem;
   background: transparent;

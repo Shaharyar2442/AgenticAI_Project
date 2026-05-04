@@ -148,12 +148,16 @@ function PhaseCard({ phase, state, progressLog }) {
 // Version history item
 // ──────────────────────────────────────────────────────────────
 function VersionItem({ v, isCurrent, onRevert, reverting }) {
+  const desc = v.description || `Snapshot v${v.version}`
+  const time = v.created_at ? new Date(v.created_at + 'Z').toLocaleTimeString([], {hour:'2-digit', minute:'2-digit'}) : ''
+
   return (
     <div className={`version-item ${isCurrent ? 'version-current' : ''}`}>
       <div className="version-meta">
         <span className="version-number">v{v.version}</span>
         {isCurrent && <span className="version-current-badge">Current</span>}
-        <span className="version-desc">{v.description || `Snapshot v${v.version}`}</span>
+        <span className="version-desc">{desc}</span>
+        {time && <span className="version-time">{time}</span>}
       </div>
       {!isCurrent && (
         <button
@@ -215,9 +219,16 @@ function App() {
     try {
       const res = await fetch(`/api/status/${sessionId}`)
       const data = await res.json()
-      if (data.status === 'complete' && data.state?.final_video_path) {
-        const videoPath = data.state.final_video_path.split('outputs/').pop()
-        setVideoUrl(`/outputs/${videoPath}`)
+      if (data.status === 'complete') {
+        // Use the clean video_url injected by the backend (avoids Windows path issues)
+        if (data.video_url) {
+          setVideoUrl(data.video_url)
+        } else if (data.state?.final_video_path) {
+          // Fallback: normalise Windows backslashes and extract relative path
+          const raw = data.state.final_video_path.replace(/\\/g, '/')
+          const match = raw.match(/outputs\/(.+)$/)
+          if (match) setVideoUrl(`/outputs/${match[1]}`)
+        }
         setStoryTitle(data.state?.story?.title || 'Generated Video')
         setStatus('complete')
         fetchVersions()
