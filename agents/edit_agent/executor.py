@@ -42,12 +42,13 @@ async def execute_edit(state: PipelineState, intent: EditIntent,
 
     if "phase2" in phases:
         logger.info("Re-running Phase 2 (audio)")
-        manifest = await generate_audio(state.story, session_id=f"{session_id}_edit")
+        manifest = await generate_audio(state.story, session_id=f"{session_id}_v{state.version+1}")
         state.timing_manifest = manifest
 
     if "phase3" in phases:
         logger.info("Re-running Phase 3 (video)")
-        await generate_video(state, session_id=f"{session_id}_edit")
+        await generate_video(state, session_id=f"{session_id}_v{state.version+1}")
 
     state.version += 1
     return state
+

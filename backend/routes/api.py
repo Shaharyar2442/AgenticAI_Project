@@ -7,13 +7,37 @@ from agents.orchestrator.workflow import run_pipeline
 from agents.edit_agent.agent import handle_edit
 from state_manager.state_manager import StateManager
 from shared.schemas.pipeline import PipelineState
+from shared.config import OUTPUTS_DIR
 from backend.services.session import sessions
 from typing import Optional
 import logging
+import os
 
 logger = logging.getLogger(__name__)
 router = APIRouter()
 state_mgr = StateManager()
+
+
+def _make_video_url(abs_path: str) -> Optional[str]:
+    """Convert an absolute Windows video path to a URL-safe relative path.
+    
+    e.g.  D:\\...\\data\\outputs\\video\\session_X\\final_output.mp4
+          -> /outputs/video/session_X/final_output.mp4
+    """
+    if not abs_path:
+        return None
+    # Normalise separators
+    norm = abs_path.replace("\\", "/")
+    outputs_norm = str(OUTPUTS_DIR).replace("\\", "/")
+    # Strip everything up to and including the outputs dir
+    if outputs_norm in norm:
+        rel = norm.split(outputs_norm)[-1].lstrip("/")
+        return f"/outputs/{rel}"
+    # Fallback: try splitting on 'outputs/'
+    if "outputs/" in norm:
+        rel = norm.split("outputs/")[-1]
+        return f"/outputs/{rel}"
+    return None
 
 
 class GenerateRequest(BaseModel):
@@ -57,10 +81,19 @@ async def generate(req: GenerateRequest, background_tasks: BackgroundTasks):
 
 @router.get("/status/{session_id}")
 async def get_status(session_id: str):
-    """Get pipeline status."""
+    """Get pipeline status — returns state with a URL-safe video_url field."""
     if session_id not in sessions:
         raise HTTPException(404, "Session not found")
-    return sessions[session_id]
+
+    session = dict(sessions[session_id])  # shallow copy
+
+    # Inject a clean video_url alongside the raw path so the frontend
+    # doesn't need to do any path manipulation
+    if session.get("state") and session["state"].get("final_video_path"):
+        raw_path = session["state"]["final_video_path"]
+        session["video_url"] = _make_video_url(raw_path)
+
+    return session
 
 
 @router.post("/edit")
@@ -91,9 +124,14 @@ async def edit(req: EditRequest, background_tasks: BackgroundTasks):
 
 @router.get("/versions/{session_id}")
 async def get_versions(session_id: str):
-    """Get version history."""
-    versions = state_mgr.history()
-    return {"versions": versions}
+    """Get version history for a session."""
+    try:
+        versions = state_mgr.history()  # returns [{version, created_at, description}, ...]
+        return {"versions": versions}
+    except Exception as e:
+        logger.warning(f"Could not load versions: {e}")
+        return {"versions": []}
+
 
 
 @router.post("/revert/{version}")
