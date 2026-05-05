@@ -43,3 +43,6 @@ frontend/dist/
 # Misc
 *.log
 implementation_plan*.md
+
+# Large Assets
+assets/bgm/

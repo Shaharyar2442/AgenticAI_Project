@@ -29,15 +29,15 @@ def _apply_color_shift(img, red=0, green=0, blue=0):
 
 
 FILTERS = {
-    "darken": lambda img: cv2.convertScaleAbs(img, alpha=0.6, beta=-30),
-    "brighten": lambda img: cv2.convertScaleAbs(img, alpha=1.4, beta=30),
-    "warm": lambda img: _apply_color_shift(img, red=20, blue=-20),
-    "cool": lambda img: _apply_color_shift(img, red=-20, blue=20),
+    "darken": lambda img: cv2.convertScaleAbs(img, alpha=0.35, beta=-60),
+    "brighten": lambda img: cv2.convertScaleAbs(img, alpha=1.8, beta=50),
+    "warm": lambda img: _apply_color_shift(img, red=40, blue=-30),
+    "cool": lambda img: _apply_color_shift(img, red=-30, blue=40),
     "vintage": lambda img: _apply_sepia(img),
-    "blur": lambda img: cv2.GaussianBlur(img, (15, 15), 0),
+    "blur": lambda img: cv2.GaussianBlur(img, (21, 21), 0),
     "sharpen": lambda img: cv2.filter2D(img, -1, SHARPEN_KERNEL),
     "grayscale": lambda img: cv2.cvtColor(cv2.cvtColor(img, cv2.COLOR_BGR2GRAY), cv2.COLOR_GRAY2BGR),
-    "contrast": lambda img: cv2.convertScaleAbs(img, alpha=1.5, beta=0),
+    "contrast": lambda img: cv2.convertScaleAbs(img, alpha=2.0, beta=-30),
     "invert": lambda img: cv2.bitwise_not(img),
 }
 
