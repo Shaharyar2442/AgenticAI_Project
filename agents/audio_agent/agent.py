@@ -32,7 +32,7 @@ async def generate_audio(story: StoryOutput, session_id: str = "default") -> Tim
         if char.voice_id:
             voice_map[char.id] = char.voice_id
         else:
-            voice_map[char.id] = match_voice(char.voice_description)
+            voice_map[char.id] = match_voice(char.voice_description, character_id=char.id)
     logger.info(f"Voice map: {voice_map}")
 
     all_segments = []

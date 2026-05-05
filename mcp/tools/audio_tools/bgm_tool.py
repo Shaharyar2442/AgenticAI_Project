@@ -12,7 +12,7 @@ import logging
 
 logger = logging.getLogger(__name__)
 
-# Mood -> BGM filename mapping
+# Mood -> BGM 
 MOOD_BGM_MAP = {
     "happy":       "happy_upbeat.mp3",
     "sad":         "sad_melancholic.mp3",
@@ -29,12 +29,12 @@ MOOD_BGM_MAP = {
 
 # No-copyright YouTube sources — verified working
 BGM_SOURCES = {
-    "happy_upbeat":    "https://www.youtube.com/watch?v=5qap5aO4i9A",
-    "sad_melancholic": "https://www.youtube.com/watch?v=B4BXGTNF9jU",
-    "tense_suspense":  "https://www.youtube.com/watch?v=EqPtz5qN7HM",
-    "epic_adventure":  "https://www.youtube.com/watch?v=hHW1oY26kxQ",
-    "calm_peaceful":   "https://www.youtube.com/watch?v=2OEL4P1Rz04",
-    "mysterious_dark": "https://www.youtube.com/watch?v=ukgNzLwkd9Y",
+    "happy_upbeat":    "https://www.youtube.com/watch?v=8fbfVdEz7Lk&list=PLIILL6veL7802G94eulr2fzj0wz7CwKqh&index=2",
+    "sad_melancholic": "https://www.youtube.com/watch?v=JUPoUnqDArk&list=RDJUPoUnqDArk&start_radio=1",
+    "tense_suspense":  "https://www.youtube.com/watch?v=Pgbs1EQLV7w&list=RDPgbs1EQLV7w&start_radio=1",
+    "epic_adventure":  "https://www.youtube.com/watch?v=Wz-ZZD711Oc&list=RDWz-ZZD711Oc&start_radio=1",
+    "calm_peaceful":   "https://www.youtube.com/watch?v=yhFccHgf_FQ&list=RDyhFccHgf_FQ&start_radio=1",
+    "mysterious_dark": "https://www.youtube.com/watch?v=hm0-ZTLRWEo&list=PLnlkSFP1yUmvxWB61ynHahK82aI21xNgY",
 }
 
 

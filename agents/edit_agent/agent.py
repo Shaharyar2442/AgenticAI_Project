@@ -49,7 +49,8 @@ async def execute_node(state: EditAgentState) -> EditAgentState:
     asset_paths = list(pipeline_state.scene_images.values()) + list(pipeline_state.character_portraits.values())
     if pipeline_state.final_video_path:
         asset_paths.append(pipeline_state.final_video_path)
-    state_mgr.snapshot(pipeline_state.version, pipeline_state.model_dump(), asset_paths)
+    state_mgr.snapshot(pipeline_state.version, pipeline_state.model_dump(), asset_paths,
+                       session_id=session_id, description=f"Before edit: {intent.intent}")
 
     # Execute
     updated_state = await execute_edit(pipeline_state, intent, plan, session_id)
@@ -58,7 +59,8 @@ async def execute_node(state: EditAgentState) -> EditAgentState:
     new_assets = list(updated_state.scene_images.values()) + list(updated_state.character_portraits.values())
     if updated_state.final_video_path:
         new_assets.append(updated_state.final_video_path)
-    state_mgr.snapshot(updated_state.version, updated_state.model_dump(), new_assets)
+    state_mgr.snapshot(updated_state.version, updated_state.model_dump(), new_assets,
+                       session_id=session_id, description=f"After edit: {intent.intent}")
 
     return {"updated_state": updated_state}
 

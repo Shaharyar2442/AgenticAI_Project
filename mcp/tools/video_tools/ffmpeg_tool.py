@@ -148,11 +148,11 @@ class FFmpegTool(BaseTool):
             out_label = f"v{i}"
             start = entry["start_sec"]
             end = entry["end_sec"]
-            # main_h = height of main input (valid FFmpeg overlay variable)
-            # gte*lte avoids Windows single-quote shell parsing issues with between()
+            # 350x350 portraits, bottom-right with 30px padding
+            # format=rgba preserves circular transparent PNG masks
             filters.append(
-                f"[{inp_idx}:v]scale=250:250,format=rgba[char{i}];"
-                f"[{prev}][char{i}]overlay=20:main_h-270:"
+                f"[{inp_idx}:v]scale=350:350,format=rgba[char{i}];"
+                f"[{prev}][char{i}]overlay=main_w-380:main_h-400:"
                 f"enable='gte(t,{start})*lte(t,{end})'[{out_label}]"
             )
             prev = out_label
