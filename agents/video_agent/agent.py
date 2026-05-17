@@ -20,8 +20,12 @@ ffmpeg = FFmpegTool()
 compositor = CompositorTool()
 
 
-def _build_portrait_timeline(scene_id: str, segments, character_portraits: Dict[str, str]) -> List[Dict]:
+def _build_portrait_timeline(
+    scene_id: str, segments, character_portraits: Dict[str, str],
+    char_names: Dict[str, str] = None
+) -> List[Dict]:
     """Build portrait overlay timeline from audio segments."""
+    char_names = char_names or {}
     timeline = []
     for seg in segments:
         if seg.scene_id != scene_id or seg.type != "dialogue" or not seg.character_id:
@@ -33,6 +37,7 @@ def _build_portrait_timeline(scene_id: str, segments, character_portraits: Dict[
                 "start_sec": seg.start_ms / 1000.0,
                 "end_sec": seg.end_ms / 1000.0,
                 "character_id": seg.character_id,
+                "character_name": char_names.get(seg.character_id, ""),
             })
     return timeline
 
@@ -50,29 +55,44 @@ async def generate_video(state: PipelineState, session_id: str = "default") -> s
     for d in [img_dir, vid_dir, temp_dir]:
         os.makedirs(d, exist_ok=True)
 
-    # Step 1: Generate character portraits
+    # Step 1: Character portraits — reuse existing if already on disk
+    char_names: Dict[str, str] = {c.id: c.name for c in story.characters}
+    existing_portraits = state.character_portraits or {}
     char_portraits: Dict[str, str] = {}
     for char in story.characters:
+        existing = existing_portraits.get(char.id)
+        if existing and os.path.exists(existing):
+            char_portraits[char.id] = existing
+            logger.info(f"Reusing existing portrait for {char.name}: {existing}")
+            continue
         result = await image_gen.execute(
             prompt=char.visual_description,
             output_path=os.path.join(img_dir, f"{char.id}_portrait.png"),
             image_type="portrait", seed=42
         )
         char_portraits[char.id] = result["image_path"]
+        logger.info(f"Generated new portrait for {char.name}")
     state.character_portraits = char_portraits
-    logger.info(f"Generated {len(char_portraits)} character portraits")
+    logger.info(f"Portraits ready: {len(char_portraits)} total")
 
-    # Step 2: Generate scene images
+    # Step 2: Scene images — reuse existing if already on disk
+    existing_scenes = state.scene_images or {}
     scene_images: Dict[str, str] = {}
     for i, scene in enumerate(story.scenes):
+        existing = existing_scenes.get(scene.scene_id)
+        if existing and os.path.exists(existing):
+            scene_images[scene.scene_id] = existing
+            logger.info(f"Reusing existing image for {scene.scene_id}: {existing}")
+            continue
         result = await image_gen.execute(
             prompt=scene.visual_prompt,
             output_path=os.path.join(img_dir, f"{scene.scene_id}.png"),
             image_type="scene", seed=42 + i
         )
         scene_images[scene.scene_id] = result["image_path"]
+        logger.info(f"Generated new scene image for {scene.scene_id}")
     state.scene_images = scene_images
-    logger.info(f"Generated {len(scene_images)} scene images")
+    logger.info(f"Scene images ready: {len(scene_images)} total")
 
     # Step 3: Render each scene
     scene_clips = []
@@ -90,8 +110,8 @@ async def generate_video(state: PipelineState, session_id: str = "default") -> s
         await ffmpeg.execute("ken_burns", image_path=scene_images[sid],
                             duration_sec=duration_sec, output_path=kb_path, style=style)
 
-        # 3b: Character portrait overlays
-        timeline = _build_portrait_timeline(sid, manifest.segments, char_portraits)
+        # 3b: Character portrait overlays with name labels
+        timeline = _build_portrait_timeline(sid, manifest.segments, char_portraits, char_names)
         await ffmpeg.execute("overlay_portraits", video_path=kb_path,
                             portrait_timeline=timeline, output_path=chars_path)
 

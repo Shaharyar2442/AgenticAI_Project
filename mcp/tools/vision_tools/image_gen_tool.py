@@ -2,6 +2,9 @@
 Image Generation Tool — Pollinations.ai with retry + Pillow gradient fallback.
 Portraits are generated with transparent backgrounds and post-processed
 to ensure proper alpha for FFmpeg overlay compositing.
+
+Rate limiting: Pollinations.ai has a strict rate limit. A 40-50 second
+cooldown is enforced between every API call to avoid 429 errors.
 """
 from mcp.base_tool import BaseTool
 from shared.config import POLLINATIONS_BASE_URL, IMAGE_WIDTH, IMAGE_HEIGHT, PORTRAIT_SIZE, MAX_IMAGE_RETRIES, OUTPUTS_DIR
@@ -10,30 +13,71 @@ from urllib.parse import quote
 import httpx
 import asyncio
 import os
+import time
+import random
 import logging
 
 logger = logging.getLogger(__name__)
 
-STYLE_SUFFIX = ", digital illustration, cinematic lighting, consistent art style, 16:9 aspect ratio"
-PORTRAIT_SUFFIX = ", character portrait, centered, upper body, facing forward, solid dark background, digital art style, high contrast"
+STYLE_SUFFIX = (
+    ", cinematic scene, ultra-detailed digital painting, volumetric lighting, "
+    "rich color grading, professional cinematography, 8K, award-winning concept art"
+)
+PORTRAIT_SUFFIX = (
+    ", full character portrait, centered, upper body, facing camera, "
+    "studio lighting, sharp focus, solid dark background, ultra-detailed, "
+    "professional digital art, vibrant colors, 8K"
+)
+
+# ── Pollinations rate-limit guard ──────────────────────────────────────────────
+# One global lock ensures concurrent callers queue up rather than hammer the API.
+_POLLINATIONS_LOCK = asyncio.Lock()
+_last_pollinations_call: float = 0.0          # epoch seconds of last call
+POLLINATIONS_COOLDOWN_MIN = 40                 # minimum wait seconds
+POLLINATIONS_COOLDOWN_MAX = 50                 # maximum wait seconds (random jitter)
+# ───────────────────────────────────────────────────────────────────────────────
+
+
+async def _pollinations_cooldown():
+    """Wait the rate-limit gap, then mark the call time."""
+    global _last_pollinations_call
+    cooldown = random.uniform(POLLINATIONS_COOLDOWN_MIN, POLLINATIONS_COOLDOWN_MAX)
+    elapsed = time.monotonic() - _last_pollinations_call
+    remaining = cooldown - elapsed
+    if remaining > 0:
+        logger.info(f"[Pollinations] Rate-limit cooldown: {remaining:.1f}s ...")
+        try:
+            await asyncio.sleep(remaining)
+        except asyncio.CancelledError:
+            logger.warning("[Pollinations] Cooldown interrupted by task cancellation (server shutdown?)")
+            raise   # always re-raise CancelledError so asyncio can clean up
+    _last_pollinations_call = time.monotonic()
+
 
 
 async def _download_image(url: str, output_path: str) -> bool:
-    """Download image with retry + exponential backoff."""
+    """Download image with cooldown + retry + exponential backoff."""
     max_retries = max(MAX_IMAGE_RETRIES, 5)
     for attempt in range(max_retries):
-        try:
-            async with httpx.AsyncClient(timeout=120, follow_redirects=True) as client:
-                resp = await client.get(url)
-                if resp.status_code == 200 and len(resp.content) > 1000:
-                    with open(output_path, "wb") as f:
-                        f.write(resp.content)
-                    return True
-                logger.warning(f"Attempt {attempt+1}: status={resp.status_code}, size={len(resp.content)}")
-        except Exception as e:
-            logger.warning(f"Attempt {attempt+1} failed: {e!r}")
+        # Acquire global lock so parallel callers queue up one-at-a-time
+        async with _POLLINATIONS_LOCK:
+            await _pollinations_cooldown()
+            try:
+                async with httpx.AsyncClient(timeout=120, follow_redirects=True) as client:
+                    resp = await client.get(url)
+                    if resp.status_code == 200 and len(resp.content) > 1000:
+                        with open(output_path, "wb") as f:
+                            f.write(resp.content)
+                        logger.info(f"[Pollinations] Image downloaded successfully on attempt {attempt+1}")
+                        return True
+                    logger.warning(f"Attempt {attempt+1}: status={resp.status_code}, size={len(resp.content)}")
+            except Exception as e:
+                logger.warning(f"Attempt {attempt+1} failed: {e!r}")
+        # Exponential back-off between retries (outside lock so others aren't blocked)
         wait = min(2 ** attempt, 30)
-        await asyncio.sleep(wait)
+        if attempt < max_retries - 1:
+            logger.info(f"[Pollinations] Retry back-off: {wait}s")
+            await asyncio.sleep(wait)
     return False
 
 
@@ -112,7 +156,11 @@ class ImageGenTool(BaseTool):
             full_prompt = f"{prompt}{STYLE_SUFFIX}"
             w, h = IMAGE_WIDTH, IMAGE_HEIGHT
 
-        url = f"{POLLINATIONS_BASE_URL}/{quote(full_prompt)}?width={w}&height={h}&seed={seed}&nologo=true"
+        url = (
+            f"{POLLINATIONS_BASE_URL}/{quote(full_prompt)}"
+            f"?width={w}&height={h}&seed={seed}"
+            f"&model=flux&enhance=true&nologo=true"
+        )
         os.makedirs(os.path.dirname(output_path), exist_ok=True)
 
         if await _download_image(url, output_path):

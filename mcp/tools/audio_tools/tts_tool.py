@@ -33,57 +33,66 @@ VOICE_MAP = {
     "default": "en-US-AriaNeural",
 }
 
-# Separate pools so characters always sound different
-_MALE_POOL = ["male_1", "male_2", "male_3", "male_4"]
-_FEMALE_POOL = ["female_1", "female_2", "female_3", "female_4"]
-_male_idx = 0
-_female_idx = 0
+# Male voices — different accents/ages
+_MALE_POOL = [
+    "en-US-ChristopherNeural",   # deep American male
+    "en-GB-RyanNeural",          # British male
+    "en-AU-WilliamNeural",       # Australian male
+    "en-IN-PrabhatNeural",       # Indian male
+]
+# Female voices — different accents/ages
+_FEMALE_POOL = [
+    "en-US-JennyNeural",         # warm American female
+    "en-GB-SoniaNeural",         # British female
+    "en-AU-NatashaNeural",       # Australian female
+    "en-US-MichelleNeural",      # clear American female
+]
 
-# gTTS accent fallback — different tlds produce different accents
-GTTS_ACCENTS = ["com", "co.uk", "com.au", "co.in", "ca"]
-_gtts_accent_idx = 0
 
-
-def match_voice(voice_description: str, character_id: str = "") -> str:
-    """Match a character's voice_description to an edge-tts voice name.
-    Uses round-robin within gender pools so each character sounds different.
+def match_voice(voice_description: str, character_id: str = "",
+                gender: str = "", char_index: int = 0) -> str:
+    """Map a character to an edge-tts voice.
+    
+    gender must be pre-resolved by the caller (e.g. via _infer_gender in audio_agent).
+    char_index drives stateless round-robin within each gender pool.
     """
-    global _male_idx, _female_idx
-    desc = voice_description.lower()
+    g = gender.lower().strip()
 
-    if "narrator" in desc or "narrat" in desc:
-        if any(w in desc for w in ["female", "woman", "girl"]):
-            return VOICE_MAP["narrator_female"]
+    # --- Primary: use caller-resolved gender ---
+    if g == "male":
+        voice = _MALE_POOL[char_index % len(_MALE_POOL)]
+        logger.info(f"  [voice] {character_id} → MALE pool[{char_index}] = {voice}")
+        return voice
+    if g == "female":
+        voice = _FEMALE_POOL[char_index % len(_FEMALE_POOL)]
+        logger.info(f"  [voice] {character_id} → FEMALE pool[{char_index}] = {voice}")
+        return voice
+
+    # --- Narrator check ---
+    desc = voice_description.lower()
+    if "narrator" in desc:
         return VOICE_MAP["narrator_male"]
 
+    # --- Child check ---
     if any(w in desc for w in ["child", "kid", "young boy"]):
         return VOICE_MAP["child_male"]
     if any(w in desc for w in ["young girl", "child girl"]):
         return VOICE_MAP["child_female"]
 
-    if any(w in desc for w in ["male", "man", "boy", "deep", "baritone", "gruff", "husky"]):
-        key = _MALE_POOL[_male_idx % len(_MALE_POOL)]
-        _male_idx += 1
-        return VOICE_MAP[key]
+    # --- Final fallback: odd char index = male, even = female ---
+    num = int("".join(filter(str.isdigit, character_id)) or "1")
+    if num % 2 == 1:
+        voice = _MALE_POOL[char_index % len(_MALE_POOL)]
+        logger.info(f"  [voice] {character_id} → fallback MALE pool[{char_index}] = {voice}")
+        return voice
+    voice = _FEMALE_POOL[char_index % len(_FEMALE_POOL)]
+    logger.info(f"  [voice] {character_id} → fallback FEMALE pool[{char_index}] = {voice}")
+    return voice
 
-    if any(w in desc for w in ["female", "woman", "girl", "soft", "gentle", "soprano"]):
-        key = _FEMALE_POOL[_female_idx % len(_FEMALE_POOL)]
-        _female_idx += 1
-        return VOICE_MAP[key]
 
-    # Default: alternate between pools based on character_id
-    if character_id:
-        num = int(''.join(filter(str.isdigit, character_id)) or '0')
-        if num % 2 == 0:
-            key = _FEMALE_POOL[_female_idx % len(_FEMALE_POOL)]
-            _female_idx += 1
-            return VOICE_MAP[key]
-        else:
-            key = _MALE_POOL[_male_idx % len(_MALE_POOL)]
-            _male_idx += 1
-            return VOICE_MAP[key]
-
-    return VOICE_MAP["default"]
+# gTTS accent fallback — different tlds produce different accents
+GTTS_ACCENTS = ["com", "co.uk", "com.au", "co.in", "ca"]
+_gtts_accent_idx = 0
 
 
 def _get_gtts_accent() -> str:
@@ -92,6 +101,7 @@ def _get_gtts_accent() -> str:
     accent = GTTS_ACCENTS[_gtts_accent_idx % len(GTTS_ACCENTS)]
     _gtts_accent_idx += 1
     return accent
+
 
 
 def _ms_to_srt(ms: int) -> str:

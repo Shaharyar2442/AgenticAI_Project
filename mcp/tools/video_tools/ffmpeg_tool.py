@@ -126,13 +126,11 @@ class FFmpegTool(BaseTool):
     async def _overlay_portraits(self, video_path: str,
                                   portrait_timeline: List[Dict],
                                   output_path: str, **kwargs) -> Dict:
-        """Overlay character portraits timed to dialogue."""
-        # Guard: narration-only scenes have no dialogue -> no portraits
+        """Overlay character portraits as lower-left talking-head panels with name labels."""
         if not portrait_timeline:
             shutil.copy(video_path, output_path)
             return {"success": True, "output_path": output_path, "note": "no portraits to overlay"}
 
-        # Guard: check input video exists before proceeding
         if not os.path.exists(video_path):
             raise FileNotFoundError(f"Input video missing for overlay: {video_path}")
 
@@ -143,19 +141,45 @@ class FFmpegTool(BaseTool):
 
         filters = []
         prev = "0:v"
+
         for i, entry in enumerate(portrait_timeline):
             inp_idx = i + 1
-            out_label = f"v{i}"
             start = entry["start_sec"]
             end = entry["end_sec"]
-            # 350x350 portraits, bottom-right with 30px padding
-            # format=rgba preserves circular transparent PNG masks
+            char_name = entry.get("character_name", "")
+            # Keep only alphanumeric + spaces, truncate to 20 chars
+            safe_name = ''.join(c for c in char_name if c.isalnum() or c == ' ')[:20].strip()
+
+            port_label = f"port{i}"
+            overlay_label = f"ov{i}"
+
+            # Scale portrait to 224x224 then pad 10px white border → 244x244
             filters.append(
-                f"[{inp_idx}:v]scale=350:350,format=rgba[char{i}];"
-                f"[{prev}][char{i}]overlay=main_w-380:main_h-400:"
-                f"enable='gte(t,{start})*lte(t,{end})'[{out_label}]"
+                f"[{inp_idx}:v]scale=224:224,"
+                f"pad=244:244:10:10:color=white,"
+                f"format=rgba[{port_label}]"
             )
-            prev = out_label
+
+            # Overlay at bottom-LEFT: x=24, y=main_h-268
+            filters.append(
+                f"[{prev}][{port_label}]"
+                f"overlay=24:main_h-268:"
+                f"enable='gte(t,{start:.3f})*lte(t,{end:.3f})'[{overlay_label}]"
+            )
+            prev = overlay_label
+
+            # Add character name as lower-third text below portrait
+            if safe_name:
+                text_label = f"txt{i}"
+                filters.append(
+                    f"[{prev}]drawtext="
+                    f"text='{safe_name}':"
+                    f"x=24:y=main_h-18:"
+                    f"fontsize=20:fontcolor=white:"
+                    f"box=1:boxcolor=0x00000099:boxborderw=6:"
+                    f"enable='gte(t,{start:.3f})*lte(t,{end:.3f})'[{text_label}]"
+                )
+                prev = text_label
 
         filter_complex = ";".join(filters)
         os.makedirs(os.path.dirname(output_path) or ".", exist_ok=True)
@@ -168,8 +192,38 @@ class FFmpegTool(BaseTool):
             "-c:a", "copy",
             output_path
         ]
-        _run_ffmpeg(cmd, "overlay_portraits")
+
+        try:
+            _run_ffmpeg(cmd, "overlay_portraits")
+        except Exception as e:
+            # If drawtext fails (Windows font issue), retry without text
+            logger.warning(f"Portrait overlay with text failed ({e}), retrying without name labels...")
+            filters_notxt = []
+            prev2 = "0:v"
+            for i, entry in enumerate(portrait_timeline):
+                inp_idx = i + 1
+                start = entry["start_sec"]
+                end = entry["end_sec"]
+                port_label = f"p{i}"
+                ov_label = f"o{i}"
+                filters_notxt.append(
+                    f"[{inp_idx}:v]scale=224:224,pad=244:244:10:10:color=white,format=rgba[{port_label}]"
+                )
+                filters_notxt.append(
+                    f"[{prev2}][{port_label}]overlay=24:main_h-268:"
+                    f"enable='gte(t,{start:.3f})*lte(t,{end:.3f})'[{ov_label}]"
+                )
+                prev2 = ov_label
+            fc2 = ";".join(filters_notxt)
+            cmd2 = ["ffmpeg", "-y"] + input_args + [
+                "-filter_complex", fc2,
+                "-map", f"[{prev2}]", "-map", "0:a?",
+                "-c:v", "libx264", "-c:a", "copy", output_path
+            ]
+            _run_ffmpeg(cmd2, "overlay_portraits_notxt")
+
         return {"success": True, "output_path": output_path}
+
 
     async def _speed_change(self, video_path: str, speed_factor: float,
                             output_path: str, **kwargs) -> Dict:

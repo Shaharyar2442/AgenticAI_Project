@@ -11,6 +11,7 @@ from mcp.tools.video_tools.subtitle_tool import SubtitleTool
 from shared.config import OUTPUTS_DIR
 from typing import Dict
 import os
+import re
 import logging
 
 logger = logging.getLogger(__name__)
@@ -20,20 +21,90 @@ bgm_selector = BGMTool()
 merger = AudioMergerTool()
 subtitle_mgr = SubtitleTool()
 
+# ── Gender keyword sets (whole-word matching) ─────────────────────────────────
+_MALE_WORDS = {
+    "male", "man", "boy", "deep", "baritone", "bass", "gruff", "husky",
+    "tenor", "masculine", "gentleman", "sir", "he", "him", "his",
+    "beard", "mustache", "moustache", "father", "brother", "son",
+    "king", "lord",
+}
+_FEMALE_WORDS = {
+    "female", "woman", "girl", "soprano", "alto", "bright", "gentle",
+    "soft", "lady", "feminine", "she", "her", "hers",
+    "mother", "sister", "daughter", "queen", "maiden", "princess",
+}
+
+
+def _tokens(text: str) -> set:
+    """Split text into lowercase word tokens (handles hyphens, commas, etc.)."""
+    return set(re.split(r"[\s,\-_;/\.]+", text.lower()))
+
+
+def _infer_gender(char) -> str:
+    """Multi-signal gender inference.
+    
+    Checks in order:
+    1. Explicit 'gender' field set by LLM
+    2. Whole-word matching in voice_description  (avoids 'male' in 'female' bug)
+    3. Whole-word matching in visual_description
+    4. Role-based heuristic
+    Returns 'male', 'female', or 'neutral'.
+    """
+    # 1 ── explicit gender field
+    g = getattr(char, "gender", "").lower().strip()
+    if g in ("male", "m", "man", "boy"):
+        return "male"
+    if g in ("female", "f", "woman", "girl"):
+        return "female"
+
+    # 2 ── voice description (whole words only!)
+    vd = _tokens(char.voice_description)
+    vm = bool(vd & _MALE_WORDS)
+    vf = bool(vd & _FEMALE_WORDS)
+    if vm and not vf:
+        return "male"
+    if vf and not vm:
+        return "female"
+
+    # 3 ── visual description
+    vis = _tokens(char.visual_description)
+    visM = bool(vis & _MALE_WORDS)
+    visF = bool(vis & _FEMALE_WORDS)
+    if visM and not visF:
+        return "male"
+    if visF and not visM:
+        return "female"
+
+    # 4 ── role heuristic
+    if "narrator" in char.role.lower():
+        return "neutral"
+
+    return "neutral"
+
 
 async def generate_audio(story: StoryOutput, session_id: str = "default") -> TimingManifest:
     """Generate all audio for a story and produce a TimingManifest."""
     audio_dir = str(OUTPUTS_DIR / "audio" / session_id)
     os.makedirs(audio_dir, exist_ok=True)
 
-    # Build voice map: character_id -> edge-tts voice name
+    # Build voice map: character_id → edge-tts voice name
     voice_map: Dict[str, str] = {}
-    for char in story.characters:
+    for i, char in enumerate(story.characters):
         if char.voice_id:
             voice_map[char.id] = char.voice_id
         else:
-            voice_map[char.id] = match_voice(char.voice_description, character_id=char.id)
-    logger.info(f"Voice map: {voice_map}")
+            gender = _infer_gender(char)
+            assigned = match_voice(
+                char.voice_description,
+                character_id=char.id,
+                gender=gender,
+                char_index=i,
+            )
+            voice_map[char.id] = assigned
+            logger.info(f"[VoiceMap] {char.name} ({char.id}): "
+                        f"gender_field={char.gender!r} → inferred={gender!r} → voice={assigned}")
+
+    logger.info(f"Final voice map: {voice_map}")
 
     all_segments = []
     scene_durations = []
@@ -46,7 +117,7 @@ async def generate_audio(story: StoryOutput, session_id: str = "default") -> Tim
 
         # Generate narration first if present
         if scene.narration:
-            narrator_voice = voice_map.get("char_01", "en-US-AriaNeural")
+            narrator_voice = voice_map.get("char_01", "en-US-GuyNeural")
             prefix = f"{scene.scene_id}_narration"
             result = await tts.execute(
                 text=scene.narration, voice=narrator_voice,
@@ -66,7 +137,7 @@ async def generate_audio(story: StoryOutput, session_id: str = "default") -> Tim
 
         # Generate dialogue lines
         for i, line in enumerate(scene.dialogue):
-            voice = voice_map.get(line.character_id, "en-US-AriaNeural")
+            voice = voice_map.get(line.character_id, "en-US-GuyNeural")
             prefix = f"{scene.scene_id}_line_{i:02d}"
             result = await tts.execute(
                 text=line.text, voice=voice,

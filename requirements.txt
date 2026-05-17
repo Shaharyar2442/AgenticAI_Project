@@ -7,7 +7,7 @@ pydantic>=2.0.0
 python-dotenv>=1.0.0
 
 # Phase 2 - Audio
-edge-tts==6.1.9
+edge-tts>=7.2.8
 gTTS>=2.5.0
 pydub>=0.25.1
 

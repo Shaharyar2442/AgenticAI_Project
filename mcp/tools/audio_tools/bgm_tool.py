@@ -29,16 +29,16 @@ MOOD_BGM_MAP = {
 }
 
 BGM_SOURCES = {
-    "happy_upbeat":    "https://www.youtube.com/watch?v=8fbfVdEz7Lk",
-    "sad_melancholic": "https://www.youtube.com/watch?v=JUPoUnqDArk",
-    "tense_suspense":  "https://www.youtube.com/watch?v=Pgbs1EQLV7w",
-    "epic_adventure":  "https://www.youtube.com/watch?v=Wz-ZZD711Oc",
-    "calm_peaceful":   "https://www.youtube.com/watch?v=yhFccHgf_FQ",
-    "mysterious_dark": "https://www.youtube.com/watch?v=hm0-ZTLRWEo",
+    "happy_upbeat":    "https://www.youtube.com/watch?v=TW9d8vYrVFQ",  # Elektronomia - Sky High
+    "sad_melancholic": "https://www.youtube.com/watch?v=LnKUD_OAsVA",  # Elektronomia - Limitless
+    "tense_suspense":  "https://www.youtube.com/watch?v=Pgbs1EQLV7w",  # Tense orchestral
+    "epic_adventure":  "https://www.youtube.com/watch?v=Wz-ZZD711Oc",  # Epic adventure
+    "calm_peaceful":   "https://www.youtube.com/watch?v=4h8ANGHLzyU",  # Jim Yosef - Eclipse
+    "mysterious_dark": "https://www.youtube.com/watch?v=hm0-ZTLRWEo",  # Dark ambient
 }
 
-# Download timeout in seconds — prevents blocking the pipeline
-_DOWNLOAD_TIMEOUT = 60
+# Download timeout — generous to handle slow connections
+_DOWNLOAD_TIMEOUT = 120
 
 
 def _download_bgm_sync(stem: str, bgm_dir: str) -> str | None:
@@ -62,6 +62,12 @@ def _download_bgm_sync(stem: str, bgm_dir: str) -> str | None:
         "no_warnings": True,
         # Limit to first 3 minutes only — saves download time
         "postprocessor_args": ["-t", "180"],
+        # Headers to avoid bot detection
+        "http_headers": {
+            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"
+        },
+        "socket_timeout": 30,
+        "retries": 3,
     }
 
     try:

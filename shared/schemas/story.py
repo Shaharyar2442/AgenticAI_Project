@@ -2,8 +2,27 @@
 Story & Script schemas — Phase 1 output contract.
 All downstream phases consume these models.
 """
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, model_validator
 from typing import List, Optional
+import re
+
+
+# Gender keyword sets — same as audio_agent._MALE_WORDS / _FEMALE_WORDS
+_MALE_W = {
+    "male","man","boy","deep","baritone","bass","gruff","husky",
+    "tenor","masculine","gentleman","sir","he","him","his",
+    "beard","mustache","moustache","father","brother","son",
+    "king","lord",
+}
+_FEMALE_W = {
+    "female","woman","girl","soprano","alto","bright","gentle",
+    "soft","lady","feminine","she","her","hers",
+    "mother","sister","daughter","queen","maiden","princess",
+}
+
+
+def _tok(text: str) -> set:
+    return set(re.split(r"[\s,\-_;/\.]+", text.lower()))
 
 
 class Character(BaseModel):
@@ -11,9 +30,27 @@ class Character(BaseModel):
     id: str = Field(..., description="Unique ID, e.g. 'char_01'")
     name: str = Field(..., description="Character display name")
     role: str = Field(..., description="protagonist, antagonist, narrator, supporting")
+    gender: str = Field(default="", description="Character gender: male, female, or neutral — used for voice assignment")
     voice_description: str = Field(..., description="e.g. 'deep, authoritative male voice'")
     voice_id: str = Field(default="", description="edge-tts voice name, filled by Phase 2")
     visual_description: str = Field(..., description="Physical appearance for image generation")
+
+    @model_validator(mode="after")
+    def auto_infer_gender(self) -> "Character":
+        """If gender wasn't set by the LLM, infer it from voice/visual descriptions."""
+        if self.gender.lower().strip() not in ("male", "female", "neutral", "m", "f"):
+            combined = _tok(self.voice_description + " " + self.visual_description)
+            is_m = bool(combined & _MALE_W)
+            is_f = bool(combined & _FEMALE_W)
+            if is_m and not is_f:
+                self.gender = "male"
+            elif is_f and not is_m:
+                self.gender = "female"
+            else:
+                # Final fallback: use char id parity (odd=male, even=female)
+                num = int(''.join(filter(str.isdigit, self.id)) or '1')
+                self.gender = "male" if num % 2 == 1 else "female"
+        return self
 
 
 class DialogueLine(BaseModel):
